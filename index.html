@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediRoute AI - Smart Ambulance & Emergency Resource System</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts (Geist/Inter-style design) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet Map CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  
+  <!-- AlpineJS -->
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #0f172a; /* Slate 900 */
+      color: #f8fafc; /* Slate 50 */
+    }
+    /* Custom map styles */
+    #map {
+      height: 480px;
+      border-radius: 1rem;
+      z-index: 10;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+    /* Pulsing red locator for emergency */
+    .pulse-emergency {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+      }
+      70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+      }
+    }
+  </style>
+</head>
+<body x-data="smartAmbulanceApp()" x-init="initApp()">
+
+  <!-- Toast Notification System -->
+  <div class="fixed top-5 right-5 z-50 space-y-3 pointer-events-none">
+    <template x-for="toast in toasts" :key="toast.id">
+      <div class="flex items-center p-4 rounded-xl shadow-lg border border-slate-700 pointer-events-auto transition-all duration-300 max-w-sm"
+           :class="{
+             'bg-emerald-950/90 border-emerald-500/30 text-emerald-200': toast.type === 'success',
+             'bg-rose-950/90 border-rose-500/30 text-rose-200': toast.type === 'error',
+             'bg-blue-950/90 border-blue-500/30 text-blue-200': toast.type === 'info'
+           }">
+        <div class="mr-3">
+          <i class="bi" :class="{
+            'bi-check-circle-fill text-emerald-400': toast.type === 'success',
+            'bi-exclamation-triangle-fill text-rose-400': toast.type === 'error',
+            'bi-info-circle-fill text-blue-400': toast.type === 'info'
+          }"></i>
+        </div>
+        <div class="flex-1 text-sm font-medium" x-text="toast.message"></div>
+        <button @click="removeToast(toast.id)" class="ml-4 hover:opacity-75 transition-opacity">
+          <i class="bi bi-x-lg text-xs"></i>
+        </button>
+      </div>
+    </template>
+  </div>
+
+  <!-- Main Navigation -->
+  <nav class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <div class="p-2 bg-gradient-to-br from-sky-500 to-blue-600 rounded-xl shadow-md shadow-sky-500/20">
+            <i class="bi bi-shield-plus text-xl text-white"></i>
+          </div>
+          <div>
+            <span class="font-bold text-lg tracking-tight text-white bg-clip-text">MediRoute AI</span>
+            <span class="block text-[10px] uppercase tracking-widest text-sky-400 font-semibold">Smart Ambulance &amp; Clinical Library</span>
+          </div>
+        </div>
+        
+        <div class="flex items-center gap-4">
+          <div class="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-300">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            System Core Active
+          </div>
+          <button @click="triggerSOSModal()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-xl flex items-center gap-2 transition shadow-lg shadow-rose-600/30 pulse-emergency">
+            <i class="bi bi-exclamation-circle-fill"></i>
+            Quick SOS Dispatch
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Grid Dashboard -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    
+    <!-- Top Stats Bar -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+        <div class="p-3 bg-blue-500/10 text-blue-400 rounded-xl">
+          <i class="bi bi-truck text-2xl"></i>
+        </div>
+        <div>
+          <p class="text-xs text-slate-400 font-medium">Fleet Library Size</p>
+          <h3 class="text-2xl font-bold text-slate-100" x-text="ambulances.length">0</h3>
+        </div>
+      </div>
+      
+      <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+        <div class="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl">
+          <i class="bi bi-building-check text-2xl"></i>
+        </div>
+        <div>
+          <p class="text-xs text-slate-400 font-medium">ICU Beds Available</p>
+          <h3 class="text-2xl font-bold text-emerald-400" x-text="totalIcuBeds">0</h3>
+        </div>
+      </div>
+      
+      <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+        <div class="p-3 bg-amber-500/10 text-amber-400 rounded-xl">
+          <i class="bi bi-activity text-2xl"></i>
+        </div>
+        <div>
+          <p class="text-xs text-slate-400 font-medium">Active Emergencies</p>
+          <h3 class="text-2xl font-bold text-amber-400" x-text="activeEmergencyCount">0</h3>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+        <div class="p-3 bg-rose-500/10 text-rose-400 rounded-xl">
+          <i class="bi bi-speedometer text-2xl"></i>
+        </div>
+        <div>
+          <p class="text-xs text-slate-400 font-medium">Avg Response Time</p>
+          <h3 class="text-2xl font-bold text-rose-400">8.4 mins</h3>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content Split -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Interactive Geo-Location Emergency Map & Controller (Left Column - Col Span 7) -->
+      <div class="lg:col-span-7 space-y-6">
+        
+        <!-- Live Map Interface -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <i class="bi bi-map text-sky-400"></i>
+              <h2 class="font-bold text-slate-100">Live Resource &amp; Ambulance GPS Library</h2>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="flex items-center gap-1 text-slate-400"><span class="w-2.5 h-2.5 rounded-full bg-blue-500 block"></span> Ambulance</span>
+              <span class="flex items-center gap-1 text-slate-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 block"></span> Hospital</span>
+              <span class="flex items-center gap-1 text-slate-400"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 block animate-ping"></span> SOS</span>
+            </div>
+          </div>
+          
+          <div id="map" class="border border-slate-800"></div>
+          
+          <div class="mt-3 p-3 bg-slate-950 rounded-xl border border-slate-850 flex items-center justify-between text-xs text-slate-400">
+            <span><i class="bi bi-info-circle mr-1 text-sky-400"></i> Click anywhere on the map to automatically pre-fill custom GPS emergency coordinates!</span>
+            <button @click="resetMapFocus()" class="text-sky-400 hover:underline">Center Map</button>
+          </div>
+        </div>
+
+        <!-- AI Assistant & Clinical Advisory Column -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <span class="flex h-2 w-2 relative">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+              </span>
+              <h2 class="font-bold text-slate-100">AI Medical Library &amp; Trauma Advisory</h2>
+            </div>
+            <span class="text-[10px] bg-sky-500/10 text-sky-400 px-2.5 py-1 rounded-full font-bold uppercase">Powered by GPT-4</span>
+          </div>
+
+          <p class="text-xs text-slate-400 mb-4">Ask our AI Medical Assistant for critical first-aid insights, trauma guidelines, or closest hospital suitability matching dynamic medical conditions.</p>
+          
+          <div class="space-y-3">
+            <div class="flex gap-2">
+              <input type="text" x-model="aiQuery" @keyup.enter="getAIAdvisory()"
+                     placeholder="e.g. 'Suspected cardiac arrest first aid steps and optimal hospital criteria'" 
+                     class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
+              <button @click="getAIAdvisory()" :disabled="aiLoading"
+                      class="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition disabled:opacity-50">
+                <template x-if="!aiLoading">
+                  <span>Analyze</span>
+                </template>
+                <template x-if="aiLoading">
+                  <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                </template>
+                <i class="bi bi-cpu"></i>
+              </button>
+            </div>
+
+            <!-- Response Bubble -->
+            <div x-show="aiResponse" x-transition class="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs space-y-2">
+              <div class="flex items-center justify-between text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                <span>Clinical Advisory Response</span>
+                <button @click="aiResponse = ''" class="hover:text-slate-300">Clear</button>
+              </div>
+              <div class="text-slate-300 leading-relaxed space-y-1" x-html="aiResponse"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Resource Tabs (Ambulance Fleet, Hospitals Directory, Active Alerts) -->
+      <div class="lg:col-span-5 space-y-6">
+        
+        <!-- Tab Navigation -->
+        <div class="bg-slate-900 border border-slate-850 rounded-2xl p-1.5 flex gap-1">
+          <button @click="currentTab = 'ambulances'" 
+                  :class="currentTab === 'ambulances' ? 'bg-slate-800 text-slate-100 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'" 
+                  class="flex-1 py-2 text-center text-xs rounded-xl transition">
+            <i class="bi bi-truck mr-1.5"></i> Ambulance Fleet
+          </button>
+          <button @click="currentTab = 'hospitals'" 
+                  :class="currentTab === 'hospitals' ? 'bg-slate-800 text-slate-100 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'" 
+                  class="flex-1 py-2 text-center text-xs rounded-xl transition">
+            <i class="bi bi-building-add mr-1.5"></i> Hospital Resource
+          </button>
+          <button @click="currentTab = 'logs'" 
+                  :class="currentTab === 'logs' ? 'bg-slate-800 text-slate-100 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'" 
+                  class="flex-1 py-2 text-center text-xs rounded-xl transition">
+            <i class="bi bi-journal-medical mr-1.5"></i> Emergency Logs
+          </button>
+        </div>
+
+        <!-- TAB 1: AMBULANCE FLEET -->
+        <div x-show="currentTab === 'ambulances'" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="font-bold text-slate-100 text-sm">Ambulance Fleet Registry (Library)</h2>
+              <p class="text-[11px] text-slate-400">Add, track and dispatch connected rescue vehicles.</p>
+            </div>
+            <button @click="showAddAmbulanceModal = true" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-sky-400 border border-slate-700/50 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+              <i class="bi bi-plus-lg"></i> Add Vehicle
+            </button>
+          </div>
+
+          <!-- Loading Indicator -->
+          <div x-show="loading" class="flex justify-center py-10">
+            <span class="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></span>
+          </div>
+
+          <!-- Fleet List -->
+          <div x-show="!loading" class="space-y-3 max-h-[460px] overflow-y-auto custom-scrollbar pr-1">
+            <template x-for="amb in ambulances" :key="amb._id || amb.id">
+              <div class="bg-slate-950 border border-slate-800/60 hover:border-slate-700/80 rounded-xl p-3.5 transition flex flex-col gap-2.5">
+                <div class="flex items-start justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl flex items-center justify-center"
+                         :class="{
+                           'bg-emerald-500/10 text-emerald-400': amb.status === 'Available',
+                           'bg-amber-500/10 text-amber-400': amb.status === 'Dispatched',
+                           'bg-slate-800 text-slate-400': amb.status === 'Maintenance'
+                         }">
+                      <i class="bi bi-truck text-base"></i>
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-xs text-slate-200" x-text="amb.vehicleId"></span>
+                        <span class="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded"
+                              :class="{
+                                'bg-sky-500/10 text-sky-400': amb.type === 'ALS',
+                                'bg-purple-500/10 text-purple-400': amb.type === 'BLS'
+                              }" x-text="amb.type"></span>
+                      </div>
+                      <span class="text-[10px] text-slate-500" x-text="'Driver: ' + amb.driverName"></span>
+                    </div>
+                  </div>
+                  
+                  <span class="text-[10px] px-2.5 py-1 rounded-full font-semibold border"
+                        :class="{
+                          'bg-emerald-950/40 border-emerald-500/20 text-emerald-400': amb.status === 'Available',
+                          'bg-amber-950/40 border-amber-500/20 text-amber-400': amb.status === 'Dispatched',
+                          'bg-slate-900 border-slate-800 text-slate-400': amb.status === 'Maintenance'
+                        }" x-text="amb.status"></span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-400 border-t border-slate-900 pt-2">
+                  <div><i class="bi bi-heart-pulse text-sky-400 mr-1"></i> <span x-text="amb.equipment"></span></div>
+                  <div><i class="bi bi-telephone text-sky-400 mr-1"></i> <span x-text="amb.contact"></span></div>
+                </div>
+
+                <div class="flex items-center justify-between mt-1 pt-1.5 border-t border-slate-900">
+                  <button @click="focusOnMap(amb.lat, amb.lng, amb.vehicleId, 'ambulance')" class="text-[10px] text-sky-400 hover:underline flex items-center gap-1">
+                    <i class="bi bi-geo-alt"></i> Pinpoint Location
+                  </button>
+                  <button @click="deleteAmbulance(amb._id || amb.id)" class="text-[10px] text-rose-400 hover:text-rose-300">
+                    <i class="bi bi-trash"></i> Decommission
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- TAB 2: HOSPITALS & RESOURCE LOCATOR -->
+        <div x-show="currentTab === 'hospitals'" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="font-bold text-slate-100 text-sm">Hospitals &amp; Clinical Resources</h2>
+              <p class="text-[11px] text-slate-400">Live ICU beds, specialized trauma capabilities &amp; locator.</p>
+            </div>
+            <button @click="showAddHospitalModal = true" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-emerald-400 border border-slate-700/50 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+              <i class="bi bi-plus-lg"></i> Add Facility
+            </button>
+          </div>
+
+          <!-- Hospitals List -->
+          <div class="space-y-3 max-h-[460px] overflow-y-auto custom-scrollbar pr-1">
+            <template x-for="hosp in hospitals" :key="hosp._id || hosp.id">
+              <div class="bg-slate-950 border border-slate-800/60 hover:border-slate-700/80 rounded-xl p-3.5 transition flex flex-col gap-2.5">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <h4 class="font-bold text-xs text-slate-200" x-text="hosp.name"></h4>
+                    <span class="text-[9px] text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full inline-block mt-1 font-semibold" x-text="hosp.specialty"></span>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-xs font-bold text-emerald-400" x-text="hosp.icuBeds"></span>
+                    <span class="block text-[8px] text-slate-400 font-medium">ICU Beds Free</span>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-400 border-t border-slate-900 pt-2">
+                  <div><i class="bi bi-building text-sky-400 mr-1"></i> <span x-text="hosp.address"></span></div>
+                  <div><i class="bi bi-telephone text-sky-400 mr-1"></i> <span x-text="hosp.phone"></span></div>
+                </div>
+
+                <div class="flex items-center justify-between mt-1 pt-1.5 border-t border-slate-900">
+                  <button @click="focusOnMap(hosp.lat, hosp.lng, hosp.name, 'hospital')" class="text-[10px] text-sky-400 hover:underline flex items-center gap-1">
+                    <i class="bi bi-geo-alt"></i> Focus Facility
+                  </button>
+                  <button @click="deleteHospital(hosp._id || hosp.id)" class="text-[10px] text-rose-400 hover:text-rose-300">
+                    <i class="bi bi-trash"></i> Remove
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- TAB 3: EMERGENCY LOGS -->
+        <div x-show="currentTab === 'logs'" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div>
+            <h2 class="font-bold text-slate-100 text-sm">Emergency Dispatch Logs</h2>
+            <p class="text-[11px] text-slate-400">History and tracking of SOS emergency requests from database.</p>
+          </div>
+
+          <div class="space-y-3 max-h-[460px] overflow-y-auto custom-scrollbar pr-1">
+            <template x-show="emergencies.length === 0">
+              <div class="text-center py-8 text-slate-500 text-xs">No active or historical dispatch logs found.</div>
+            </template>
+            <template x-for="emergency in emergencies" :key="emergency._id">
+              <div class="bg-slate-950 border border-slate-800/60 rounded-xl p-3.5 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-rose-400 flex items-center gap-1">
+                    <i class="bi bi-heart-pulse-fill"></i>
+                    <span x-text="emergency.condition"></span>
+                  </span>
+                  <span class="text-[9px] uppercase px-2 py-0.5 rounded font-bold"
+                        :class="{
+                          'bg-rose-500/10 text-rose-400 animate-pulse': emergency.status === 'Pending',
+                          'bg-amber-500/10 text-amber-400': emergency.status === 'Ambulance En Route',
+                          'bg-emerald-500/10 text-emerald-400': emergency.status === 'Resolved'
+                        }" x-text="emergency.status"></span>
+                </div>
+
+                <div class="text-[11px] text-slate-300">
+                  <p class="font-medium" x-text="'Patient: ' + emergency.patientName"></p>
+                  <p class="text-slate-400 text-[10px] mt-0.5" x-text="'Reported Location: Lat ' + emergency.lat.toFixed(4) + ', Lng ' + emergency.lng.toFixed(4)"></p>
+                </div>
+
+                <div class="flex items-center justify-between pt-2 border-t border-slate-900 text-[10px]">
+                  <button @click="focusOnMap(emergency.lat, emergency.lng, emergency.patientName, 'emergency')" class="text-sky-400 hover:underline">
+                    <i class="bi bi-geo"></i> Plot On Map
+                  </button>
+
+                  <div class="flex gap-2">
+                    <template x-if="emergency.status === 'Pending'">
+                      <button @click="updateEmergencyStatus(emergency._id, 'Ambulance En Route')" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded font-medium transition">
+                        Dispatch Amb
+                      </button>
+                    </template>
+                    <template x-if="emergency.status === 'Ambulance En Route'">
+                      <button @click="updateEmergencyStatus(emergency._id, 'Resolved')" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium transition">
+                        Resolve
+                      </button>
+                    </template>
+                    <button @click="deleteEmergency(emergency._id)" class="text-slate-500 hover:text-rose-400 p-0.5">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <!-- MODAL 1: Quick SOS Dispatch -->
+  <div x-show="showSOSModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" x-transition>
+    <div @click.away="showSOSModal = false" class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-lg text-slate-100 flex items-center gap-2">
+          <i class="bi bi-exclamation-triangle-fill text-rose-500"></i> Dispatch Smart Ambulance SOS
+        </h3>
+        <button @click="showSOSModal = false" class="text-slate-400 hover:text-slate-200">
+          <i class="bi bi-x-lg text-lg"></i>
+        </button>
+      </div>
+
+      <form @submit.prevent="submitSOSRequest()" class="space-y-4 text-xs">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Patient Full Name / Anonymous</label>
+          <input type="text" x-model="sosForm.patientName" required
+                 class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50">
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Contact Phone</label>
+            <input type="text" x-model="sosForm.contact" required
+                   class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Medical Condition Severity</label>
+            <select x-model="sosForm.condition" required
+                    class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50">
+              <option value="Severe Trauma / Bleeding">Severe Trauma / Bleeding</option>
+              <option value="Cardiac Chest Pain">Cardiac Chest Pain</option>
+              <option value="Stroke / Neurological Issues">Stroke / Neurological Issues</option>
+              <option value="Respiratory Distress">Respiratory Distress</option>
+              <option value="General Emergency Medical">General Emergency Medical</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Location picker display -->
+        <div class="bg-slate-950 border border-slate-850 p-3 rounded-xl space-y-2">
+          <span class="block font-bold text-[10px] uppercase text-slate-500 tracking-wider">Target Geo Location coordinates</span>
+          <div class="grid grid-cols-2 gap-2 text-xs text-slate-300">
+            <div>Latitude: <strong class="text-sky-400" x-text="sosForm.lat.toFixed(6)"></strong></div>
+            <div>Longitude: <strong class="text-sky-400" x-text="sosForm.lng.toFixed(6)"></strong></div>
+          </div>
+          <p class="text-[10px] text-slate-500"><i class="bi bi-info-circle mr-0.5"></i> Grabs current GPS, or matches coordinates from map selection.</p>
+        </div>
+
+        <div class="flex gap-3 justify-end pt-2">
+          <button type="button" @click="showSOSModal = false" class="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl font-semibold">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold shadow-lg shadow-rose-600/25">
+            Trigger Immediate Rescue Route
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: Add Ambulance -->
+  <div x-show="showAddAmbulanceModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" x-transition>
+    <div @click.away="showAddAmbulanceModal = false" class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-base text-slate-100">
+          <i class="bi bi-truck text-sky-400 mr-1"></i> Register New Rescue Unit
+        </h3>
+        <button @click="showAddAmbulanceModal = false" class="text-slate-400 hover:text-slate-200">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+      <form @submit.prevent="submitAddAmbulance()" class="space-y-4 text-xs">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Vehicle Unit ID</label>
+          <input type="text" x-model="ambForm.vehicleId" placeholder="e.g. AMB-902" required
+                 class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Driver Name</label>
+            <input type="text" x-model="ambForm.driverName" placeholder="John Doe" required
+                   class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Unit Type</label>
+            <select x-model="ambForm.type" required
+                    class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none">
+              <option value="ALS">ALS (Advanced Life Support)</option>
+              <option value="BLS">BLS (Basic Life Support)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Contact Phone</label>
+          <input type="text" x-model="ambForm.contact" placeholder="+1-555-0192" required
+                 class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 focus:outline-none">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Critical Equipment Library Tag</label>
+          <input type="text" x-model="ambForm.equipment" placeholder="Defibrillator, Advanced Ventilator, Trauma Kit" required
+                 class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 focus:outline-none">
+        </div>
+
+        <div class="flex gap-3 justify-end pt-2">
+          <button type="button" @click="showAddAmbulanceModal = false" class="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-semibold">
+            Save Vehicle
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 3: Add Hospital -->
+  <div x-show="showAddHospitalModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" x-transition>
+    <div @click.away="showAddHospitalModal = false" class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-base text-slate-100">
+          <i class="bi bi-building-add text-emerald-400 mr-1"></i> Register Clinical Facility
+        </h3>
+        <button @click="showAddHospitalModal = false" class="text-slate-400 hover:text-slate-200">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+      <form @submit.prevent="submitAddHospital()" class="space-y-4 text-xs">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Hospital / Medical Center Name</label>
+          <input type="text" x-model="hospForm.name" placeholder="Mercy General Health" required
+                 class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none">
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Available ICU Beds</label>
+            <input type="number" x-model.number="hospForm.icuBeds" min="0" required
+                   class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Primary Specialty Capability</label>
+            <select x-model="hospForm.specialty" required
+                    class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none">
+              <option value="Cardiac & Stroke Center">Cardiac &amp; Stroke</option>
+              <option value="Level 1 Trauma Unit">Level 1 Trauma</option>
+              <option value="Pediatric Emergency">Pediatric Emergency</option>
+              <option value="General Surgical Medicine">General Surgical Medicine</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Address Location</label>
+          <input type="text" x-model="hospForm.address" placeholder="415 Emergency Drive, Sector 4" required
+                 class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 focus:outline-none">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Direct Contact Line</label>
+          <input type="text" x-model="hospForm.phone" placeholder="+1-555-9000" required
+                 class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 focus:outline-none">
+        </div>
+
+        <div class="flex gap-3 justify-end pt-2">
+          <button type="button" @click="showAddHospitalModal = false" class="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold">
+            Register Facility
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Footnote info & design reference -->
+  <footer class="border-t border-slate-800/80 bg-slate-950 py-6 mt-12 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
+        <span class="font-medium text-slate-400">Integrated Medical Registry / Smart Dispatch Core v2.4</span>
+      </div>
+      <div>Designed using the default premium Slate-Blue palette theme. Built for 24/7 Clinical Resilience.</div>
+    </div>
+  </footer>
+
+  <script>
+    // Configuration & Database Constants
+    const MONGO_API_URL = "https://r0c8kgwocscg8gsokogwwsw4.zetaverse.one/mongodb";
+    const AI_API_URL = "https://r0c8kgwocscg8gsokogwwsw4.zetaverse.one/ai";
+    const AUTH_HEADER = "Bearer cheVlCe8XzWYVflO9UG94wZiIkz1";
+    const APP_SLUG = "digital-modern-fresh-1854";
+
+    // Prepopulated fallbacks to keep the app highly functional even if DB is blank initially.
+    const DEFAULT_AMBULANCES = [
+      { id: "amb_1", vehicleId: "AMB-201", type: "ALS", driverName: "Marcus Vance", status: "Available", contact: "555-0144", equipment: "Lifepak Defib, Oxymetry, Trauma Pack", lat: 37.7785, lng: -122.4132 },
+      { id: "amb_2", vehicleId: "AMB-408", type: "BLS", driverName: "Sarah Jenkins", status: "Dispatched", contact: "555-0177", equipment: "Standard Ventilator, First Aid Kits", lat: 37.7692, lng: -122.4410 },
+      { id: "amb_3", vehicleId: "AMB-105", type: "ALS", driverName: "Robert Diaz", status: "Available", contact: "555-0199", equipment: "Intubation tools, Cardiac monitor", lat: 37.7850, lng: -122.4280 }
+    ];
+
+    const DEFAULT_HOSPITALS = [
+      { id: "hosp_1", name: "SF Health Center & Trauma Level 1", specialty: "Level 1 Trauma Unit", icuBeds: 12, address: "900 Potrero Ave", phone: "555-9000", lat: 37.7561, lng: -122.4056 },
+      { id: "hosp_2", name: "St. Mary's Cardiac & Stroke Specialty", specialty: "Cardiac & Stroke Center", icuBeds: 7, address: "450 Stanyan St", phone: "555-2300", lat: 37.7725, lng: -122.4542 },
+      { id: "hosp_3", name: "UCSF Pediatric Emergency", specialty: "Pediatric Emergency", icuBeds: 18, address: "1975 4th St", phone: "555-4422", lat: 37.7678, lng: -122.3908 }
+    ];
+
+    function smartAmbulanceApp() {
+      return {
+        // App State
+        currentTab: 'ambulances',
+        loading: false,
+        toasts: [],
+        
+        // Data Sources
+        ambulances: [],
+        hospitals: [],
+        emergencies: [],
+
+        // Map Instance & markers list
+        map: null,
+        markers: [],
+
+        // Modal triggers
+        showSOSModal: false,
+        showAddAmbulanceModal: false,
+        showAddHospitalModal: false,
+
+        // AI Advisory states
+        aiQuery: "",
+        aiResponse: "",
+        aiLoading: false,
+
+        // Input Forms state
+        sosForm: {
+          patientName: "",
+          contact: "",
+          condition: "Severe Trauma / Bleeding",
+          lat: 37.7749,
+          lng: -122.4194
+        },
+        ambForm: {
+          vehicleId: "",
+          driverName: "",
+          type: "ALS",
+          contact: "",
+          equipment: ""
+        },
+        hospForm: {
+          name: "",
+          icuBeds: 5,
+          specialty: "Level 1 Trauma Unit",
+          address: "",
+          phone: ""
+        },
+
+        // Toast Helper
+        addToast(message, type = 'info') {
+          const id = Date.now();
+          this.toasts.push({ id, message, type });
+          setTimeout(() => this.removeToast(id), 5000);
+        },
+        removeToast(id) {
+          this.toasts = this.toasts.filter(t => t.id !== id);
+        },
+
+        // App Initialization
+        async initApp() {
+          this.initMap();
+          await this.loadAllResources();
+        },
+
+        // Setup Leaflet Map
+        initMap() {
+          // Initialize map centered at San Francisco default coordinate
+          this.map = L.map('map').setView([37.7749, -122.4194], 13);
+          
+          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+          }).addTo(this.map);
+
+          // Click handler to pre-fill coordinates on map click
+          this.map.on('click', (e) => {
+            const { lat, lng } = e.latlng;
+            this.sosForm.lat = lat;
+            this.sosForm.lng = lng;
+            this.addToast(`Mapped Coordinates selected: ${lat.toFixed(4)}, ${lng.toFixed(4)}`, 'info');
+          });
+        },
+
+        // Center map to city
+        resetMapFocus() {
+          if (this.map) {
+            this.map.setView([37.7749, -122.4194], 13);
+          }
+        },
+
+        // Trigger SOS Form Modal
+        triggerSOSModal() {
+          // Grab high-accuracy GPS coordinates if available, otherwise fallback
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                this.sosForm.lat = position.coords.latitude;
+                this.sosForm.lng = position.coords.longitude;
+                this.addToast("Device coordinates loaded successfully.", "success");
+              },
+              () => {
+                // Keep default SF downtown coordinates
+                this.sosForm.lat = 37.7749 + (Math.random() - 0.5) * 0.03;
+                this.sosForm.lng = -122.4194 + (Math.random() - 0.5) * 0.03;
+                this.addToast("Using randomized local zone coordinates.", "info");
+              }
+            );
+          }
+          this.showSOSModal = true;
+        },
+
+        // Fetch everything from MongoDB endpoint
+        async loadAllResources() {
+          this.loading = true;
+          try {
+            // Read Ambulances
+            let ambResponse = await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ appSlug: APP_SLUG, action: 'read', collection: 'ambulances' })
+            });
+            let ambData = await ambResponse.json();
+            if (ambData.success && ambData.result && ambData.result.length > 0) {
+              this.ambulances = ambData.result;
+            } else {
+              // Prepopulate if database collection is empty (First boot safety rule)
+              this.ambulances = [...DEFAULT_AMBULANCES];
+              for (let amb of DEFAULT_AMBULANCES) {
+                await fetch(MONGO_API_URL, {
+                  method: 'POST',
+                  headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ appSlug: APP_SLUG, action: 'create', collection: 'ambulances', data: amb })
+                });
+              }
+            }
+
+            // Read Hospitals
+            let hospResponse = await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ appSlug: APP_SLUG, action: 'read', collection: 'hospitals' })
+            });
+            let hospData = await hospResponse.json();
+            if (hospData.success && hospData.result && hospData.result.length > 0) {
+              this.hospitals = hospData.result;
+            } else {
+              this.hospitals = [...DEFAULT_HOSPITALS];
+              for (let hosp of DEFAULT_HOSPITALS) {
+                await fetch(MONGO_API_URL, {
+                  method: 'POST',
+                  headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ appSlug: APP_SLUG, action: 'create', collection: 'hospitals', data: hosp })
+                });
+              }
+            }
+
+            // Read Emergency Alerts
+            let emgResponse = await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ appSlug: APP_SLUG, action: 'read', collection: 'emergencies' })
+            });
+            let emgData = await emgResponse.json();
+            if (emgData.success && emgData.result) {
+              this.emergencies = emgData.result;
+            }
+
+            // Update Map Visual markers
+            this.renderMapMarkers();
+
+          } catch (err) {
+            console.error("Database fetch failed. Displaying premium offline simulations.", err);
+            this.ambulances = [...DEFAULT_AMBULANCES];
+            this.hospitals = [...DEFAULT_HOSPITALS];
+            this.addToast("Network sync warning. Loading offline data safely.", "error");
+            this.renderMapMarkers();
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Render Color-coded Dynamic Markers on Map
+        renderMapMarkers() {
+          // Clear older markers from screen
+          this.markers.forEach(m => this.map.removeLayer(m));
+          this.markers = [];
+
+          // Add Ambulance Markers (Blue)
+          this.ambulances.forEach(amb => {
+            const ambIcon = L.divIcon({
+              className: 'custom-div-icon',
+              html: `<div class="w-8 h-8 rounded-full bg-blue-600 border-2 border-white flex items-center justify-center text-white shadow-lg"><i class="bi bi-truck text-xs"></i></div>`,
+              iconSize: [32, 32],
+              iconAnchor: [16, 16]
+            });
+            const m = L.marker([amb.lat, amb.lng], { icon: ambIcon })
+              .bindPopup(`<strong>Rescue Unit: ${amb.vehicleId}</strong><br>Driver: ${amb.driverName}<br>Status: ${amb.status}`)
+              .addTo(this.map);
+            this.markers.push(m);
+          });
+
+          // Add Hospital Markers (Emerald)
+          this.hospitals.forEach(hosp => {
+            const hospIcon = L.divIcon({
+              className: 'custom-div-icon',
+              html: `<div class="w-8 h-8 rounded-full bg-emerald-600 border-2 border-white flex items-center justify-center text-white shadow-lg"><i class="bi bi-building-check text-xs"></i></div>`,
+              iconSize: [32, 32],
+              iconAnchor: [16, 16]
+            });
+            const m = L.marker([hosp.lat, hosp.lng], { icon: hospIcon })
+              .bindPopup(`<strong>${hosp.name}</strong><br>${hosp.specialty}<br>Free Beds: ${hosp.icuBeds}`)
+              .addTo(this.map);
+            this.markers.push(m);
+          });
+
+          // Add Active Emergency Markers (Red Pulsing)
+          this.emergencies.forEach(emg => {
+            if (emg.status !== 'Resolved') {
+              const emgIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div class="w-9 h-9 rounded-full bg-rose-600 border-2 border-white flex items-center justify-center text-white shadow-xl pulse-emergency"><i class="bi bi-heart-pulse text-sm"></i></div>`,
+                iconSize: [36, 36],
+                iconAnchor: [18, 18]
+              });
+              const m = L.marker([emg.lat, emg.lng], { icon: emgIcon })
+                .bindPopup(`<strong>Active SOS: ${emg.patientName}</strong><br>Condition: ${emg.condition}<br>Status: ${emg.status}`)
+                .addTo(this.map);
+              this.markers.push(m);
+            }
+          });
+        },
+
+        // Map utilities
+        focusOnMap(lat, lng, title, type) {
+          if (this.map) {
+            this.map.setView([lat, lng], 15);
+            this.addToast(`Panned target to: ${title}`, 'info');
+          }
+        },
+
+        // Submit SOS Request to DB
+        async submitSOSRequest() {
+          this.loading = true;
+          const emergencyRecord = {
+            patientName: this.sosForm.patientName || "Anonymous Patient",
+            contact: this.sosForm.contact,
+            condition: this.sosForm.condition,
+            lat: this.sosForm.lat,
+            lng: this.sosForm.lng,
+            status: "Pending",
+            timestamp: new Date().toISOString()
+          };
+
+          try {
+            let response = await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                appSlug: APP_SLUG,
+                action: 'create',
+                collection: 'emergencies',
+                data: emergencyRecord
+              })
+            });
+
+            let data = await response.json();
+            if (data.success) {
+              this.addToast("Emergency logged successfully. Paramedics alerted!", "success");
+              this.showSOSModal = false;
+              // Reset input form
+              this.sosForm.patientName = "";
+              this.sosForm.contact = "";
+              
+              // Refresh state
+              await this.loadAllResources();
+              
+              // Automatically pull AI immediate triage guidance!
+              this.aiQuery = `Provide critical 3-step first aid instructions for a patient experiencing: ${emergencyRecord.condition}`;
+              this.getAIAdvisory();
+            } else {
+              this.addToast("Failed to save emergency alert. Please retry.", "error");
+            }
+          } catch (err) {
+            console.error(err);
+            this.addToast("Network dispatch protocol error.", "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Submit New Ambulance
+        async submitAddAmbulance() {
+          this.loading = true;
+          // Assign random location near base for realism
+          const randomLat = 37.7749 + (Math.random() - 0.5) * 0.05;
+          const randomLng = -122.4194 + (Math.random() - 0.5) * 0.05;
+
+          const newAmb = {
+            vehicleId: this.ambForm.vehicleId,
+            driverName: this.ambForm.driverName,
+            type: this.ambForm.type,
+            contact: this.ambForm.contact,
+            equipment: this.ambForm.equipment,
+            status: "Available",
+            lat: randomLat,
+            lng: randomLng
+          };
+
+          try {
+            let res = await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                appSlug: APP_SLUG,
+                action: 'create',
+                collection: 'ambulances',
+                data: newAmb
+              })
+            });
+            let data = await res.json();
+            if (data.success) {
+              this.addToast(`Ambulance ${newAmb.vehicleId} added successfully to catalog`, 'success');
+              this.showAddAmbulanceModal = false;
+              this.ambForm = { vehicleId: "", driverName: "", type: "ALS", contact: "", equipment: "" };
+              await this.loadAllResources();
+            }
+          } catch (err) {
+            this.addToast("Failed to save ambulance.", "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Submit New Hospital Place
+        async submitAddHospital() {
+          this.loading = true;
+          const randomLat = 37.7749 + (Math.random() - 0.5) * 0.05;
+          const randomLng = -122.4194 + (Math.random() - 0.5) * 0.05;
+
+          const newHosp = {
+            name: this.hospForm.name,
+            icuBeds: this.hospForm.icuBeds,
+            specialty: this.hospForm.specialty,
+            address: this.hospForm.address,
+            phone: this.hospForm.phone,
+            lat: randomLat,
+            lng: randomLng
+          };
+
+          try {
+            let res = await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                appSlug: APP_SLUG,
+                action: 'create',
+                collection: 'hospitals',
+                data: newHosp
+              })
+            });
+            let data = await res.json();
+            if (data.success) {
+              this.addToast(`${newHosp.name} successfully registered.`, 'success');
+              this.showAddHospitalModal = false;
+              this.hospForm = { name: "", icuBeds: 5, specialty: "Level 1 Trauma Unit", address: "", phone: "" };
+              await this.loadAllResources();
+            }
+          } catch (err) {
+            this.addToast("Failed to add clinical hospital.", "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Delete Ambulance
+        async deleteAmbulance(id) {
+          if (!confirm("Are you sure you want to decommission this vehicle?")) return;
+          this.loading = true;
+          try {
+            await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ appSlug: APP_SLUG, action: 'delete', collection: 'ambulances', id })
+            });
+            this.addToast("Ambulance record archived.", "info");
+            await this.loadAllResources();
+          } catch (err) {
+            this.addToast("Deletion action failed.", "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Delete Hospital
+        async deleteHospital(id) {
+          if (!confirm("Are you sure you want to remove this medical center?")) return;
+          this.loading = true;
+          try {
+            await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ appSlug: APP_SLUG, action: 'delete', collection: 'hospitals', id })
+            });
+            this.addToast("Hospital record removed.", "info");
+            await this.loadAllResources();
+          } catch (err) {
+            this.addToast("Deletion action failed.", "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Update Emergency status (Simulation flow)
+        async updateEmergencyStatus(id, newStatus) {
+          this.loading = true;
+          try {
+            let res = await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                appSlug: APP_SLUG,
+                action: 'update',
+                collection: 'emergencies',
+                conditions: { _id: id },
+                data: { status: newStatus }
+              })
+            });
+            let data = await res.json();
+            if (data.success) {
+              this.addToast(`Emergency alert updated to: ${newStatus}`, "success");
+              await this.loadAllResources();
+            }
+          } catch (err) {
+            this.addToast("Failed to update SOS log status.", "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Delete Emergency log completely
+        async deleteEmergency(id) {
+          if (!confirm("Remove this emergency log permanently?")) return;
+          this.loading = true;
+          try {
+            await fetch(MONGO_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ appSlug: APP_SLUG, action: 'delete', collection: 'emergencies', id })
+            });
+            this.addToast("Log deleted.", "info");
+            await this.loadAllResources();
+          } catch (err) {
+            this.addToast("Failed to delete log.", "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // AI Operations: Request advisory
+        async getAIAdvisory() {
+          if (!this.aiQuery) return;
+          this.aiLoading = true;
+          this.aiResponse = "";
+          try {
+            let res = await fetch(AI_API_URL, {
+              method: 'POST',
+              headers: { 'Authorization': AUTH_HEADER, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: `Context: Active medical emergency routing. Question/Situation: ${this.aiQuery}. Offer short, bullet-point first aid protocols suitable for non-professionals, and specify critical hospital capabilities needed.`
+                      }
+                    ]
+                  }
+                ]
+              })
+            });
+            let data = await res.json();
+            if (data.message) {
+              // Simple markdown replacement for clean display
+              this.aiResponse = data.message.replace(/\n/g, "<br>").replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+              this.addToast("AI Trauma guidelines fetched successfully.", "success");
+            } else {
+              this.aiResponse = "AI Model is currently busy. Please review the clinical library protocols.";
+            }
+          } catch (err) {
+            this.aiResponse = "Error connecting to AI clinical server.";
+          } finally {
+            this.aiLoading = false;
+          }
+        },
+
+        // Computed totals helper
+        get totalIcuBeds() {
+          return this.hospitals.reduce((sum, h) => sum + (h.icuBeds || 0), 0);
+        },
+
+        get activeEmergencyCount() {
+          return this.emergencies.filter(e => e.status !== 'Resolved').length;
+        }
+      }
+    }
+  </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
